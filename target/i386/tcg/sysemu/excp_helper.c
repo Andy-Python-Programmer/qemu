@@ -21,6 +21,8 @@
 #include "cpu.h"
 #include "exec/exec-all.h"
 #include "tcg/helper-tcg.h"
+#include "qemu/log-for-trace.h"
+#include "hw/misc/qsan.h"
 
 typedef struct TranslateParams {
     target_ulong addr;
@@ -526,7 +528,7 @@ static G_NORETURN void raise_stage2(CPUX86State *env, TranslateFault *err,
     cpu_vmexit(env, SVM_EXIT_NPF, exit_info_1, retaddr);
 }
 
-static bool get_physical_address(CPUX86State *env, vaddr addr,
+static bool get_physical_address_inner(CPUX86State *env, vaddr addr,
                                  MMUAccessType access_type, int mmu_idx,
                                  TranslateResult *out, TranslateFault *err)
 {
@@ -590,6 +592,18 @@ static bool get_physical_address(CPUX86State *env, vaddr addr,
     out->prot = PAGE_READ | PAGE_WRITE | PAGE_EXEC;
     out->page_size = TARGET_PAGE_SIZE;
     return true;
+}
+
+static bool get_physical_address(CPUX86State *env, vaddr addr,
+                                 MMUAccessType access_type, int mmu_idx,
+                                 TranslateResult *out, TranslateFault *err)
+{
+    bool res = get_physical_address_inner(env, addr, access_type, mmu_idx, out, err);
+
+    if (res)
+        qsan_validate_access(env, out->paddr, access_type);
+
+    return res;
 }
 
 bool x86_cpu_tlb_fill(CPUState *cs, vaddr addr, int size,
