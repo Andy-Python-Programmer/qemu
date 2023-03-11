@@ -34,6 +34,9 @@ struct QsanPoison {
     LIST_HEAD(list, QsanMemoryRegion) head;
 };
 
+#define QSAN_COMMAND_POISON 1
+#define QSAN_COMMAND_ANTIDOTE 2
+
 struct QsanCommand {
     uint8_t type;
 
@@ -88,11 +91,32 @@ static void pci_qsan_write(void *opaque, hwaddr addr, uint64_t val,
     struct QsanCommand command;
     cpu_physical_memory_read(val, &command, sizeof(struct QsanCommand));
 
-    struct QsanMemoryRegion *item = malloc(sizeof(struct QsanMemoryRegion));
-    item->start = command.start;
-    item->size = command.size;
+    switch (command.type) {
+    case QSAN_COMMAND_POISON: {
+        struct QsanMemoryRegion *item = malloc(sizeof(struct QsanMemoryRegion));
+        item->start = command.start;
+        item->size = command.size;
 
-    LIST_INSERT_HEAD(&poison_list.head, item, pointers);
+        LIST_INSERT_HEAD(&poison_list.head, item, pointers);
+        break;
+    }
+
+    case QSAN_COMMAND_ANTIDOTE: {
+        struct QsanMemoryRegion *region;
+
+        LIST_FOREACH(region, &poison_list.head, pointers) {
+            if (region->start == command.start && region->size == 0) {
+                LIST_REMOVE(region, pointers);
+                break;
+            }
+        }
+
+        break;
+    }
+
+    default:
+        printf("QSAN: invalid command (type=%d)", command.type);
+    }
 }
 
 static const MemoryRegionOps pci_qsandev_mmio_ops = {
